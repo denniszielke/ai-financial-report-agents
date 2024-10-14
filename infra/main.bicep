@@ -21,9 +21,7 @@ param logAnalyticsName string = ''
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = { 'azd-env-name': environmentName, 'app': 'ai-agents', 'tracing': 'yes' }
-
-param deployPostgres bool = false
-param deploySessions bool = false
+param searchIndexName string = 'search-index'
 param completionDeploymentModelName string = 'gpt-4o'
 param completionModelName string = 'gpt-4o'
 param completionModelVersion string = '2024-08-06'
@@ -50,11 +48,6 @@ param modelDeployments array = [
   }
 ]
 
-var databaseAdmin = 'dbadmin'
-var databaseName = 'langfuse'
-@secure()
-param databasePassword string = uniqueString(subscription().id, environmentName, location)
-
 // Organize resources in a resource group
 resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   name: !empty(resourceGroupName) ? resourceGroupName : '${abbrs.resourcesResourceGroups}${environmentName}'
@@ -75,17 +68,7 @@ module containerApps './core/host/container-apps.bicep' = {
     applicationInsightsName: monitoring.outputs.applicationInsightsName
     identityName: '${abbrs.managedIdentityUserAssignedIdentities}api-agents'
     openaiName: openai.outputs.openaiName
-    dynamcSessionsName: dynamicSessions.outputs.name
-  }
-}
-
-module dynamicSessions './core/host/dynamic-sessions.bicep' = if(deploySessions) {
-  name: 'dynamic-${resourceToken}'
-  scope: resourceGroup
-  params: {
-    name: 'sessions'
-    location: location
-    tags: tags
+    searchName: search.outputs.searchName
   }
 }
 
@@ -126,43 +109,6 @@ module monitoring './core/monitor/monitoring.bicep' = {
   }
 }
 
-module postgresServer 'core/data/flexibleserver.bicep' = if(deployPostgres) {
-  name: 'postgresql'
-  scope: resourceGroup
-  params: {
-    name: '${abbrs.dBforPostgreSQLServers}${resourceToken}'
-    location: location
-    tags: tags
-    sku: {
-      name: 'Standard_B1ms'
-      tier: 'Burstable'
-    }
-    storage: {
-      storageSizeGB: 32
-    }
-    version: '16'
-    administratorLogin: databaseAdmin
-    administratorLoginPassword: databasePassword
-    databaseNames: [ databaseName ]
-    allowAzureIPsFirewall: true
-  }
-}
-
-// module langfuse 'app/fuse.bicep' = if(deployPostgres) {
-//   name: 'langfuse'
-//   scope: resourceGroup
-//   params: {
-//     name: 'langfuse'
-//     location: location
-//     tags: tags 
-//     identityName: '${abbrs.managedIdentityUserAssignedIdentities}api-agents'
-//     postgresServerFqdn: postgresServer.outputs.fqdn
-//     databaseName: databaseName
-//     databaseAdmin: databaseAdmin
-//     databasePassword: databasePassword
-//   }
-// }
-
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
 output AZURE_RESOURCE_GROUP string = resourceGroup.name
@@ -181,7 +127,7 @@ output AZURE_OPENAI_COMPLETION_MODEL string = completionModelName
 output AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME string = completionDeploymentModelName
 output AZURE_OPENAI_EMBEDDING_MODEL string = embeddingModelName
 output AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME string = embeddingDeploymentModelName
-output POOL_MANAGEMENT_ENDPOINT string = dynamicSessions.outputs.poolManagementEndpoint
 output AZURE_AI_SEARCH_NAME string = search.outputs.searchName
 output AZURE_AI_SEARCH_ENDPOINT string = search.outputs.searchEndpoint
 output AZURE_AI_SEARCH_KEY string = search.outputs.searchAdminKey
+output AZURE_AI_SEARCH_INDEX string = searchIndexName

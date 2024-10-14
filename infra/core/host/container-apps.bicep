@@ -4,8 +4,7 @@ param tags object = {}
 @description('User assigned identity name')
 param identityName string = ''
 param openaiName string
-param dynamcSessionsName string
-
+param searchName string
 param containerAppsEnvironmentName string
 param containerRegistryName string
 param logAnalyticsWorkspaceName string
@@ -52,10 +51,10 @@ module containerRegistryAccess '../security/registry-access.bicep' = {
   }
 }
 
-module searchAccess '../security/sessions-access.bicep' = {
+module searchAccess '../security/search-access.bicep' = {
   name: '${deployment().name}-dynamic-sessions'
   params: {
-    dynamicSessionsName: dynamcSessionsName
+    searchName: searchName
     principalId: userIdentity.properties.principalId
   }
 }

@@ -89,10 +89,6 @@ resource app 'Microsoft.App/containerApps@2023-04-01-preview' = {
               name: 'AZURE_AI_SEARCH_ENDPOINT'
               value: 'https://${search.name}.search.windows.net'
             }
-            {
-              name: 'AZURE_AI_SEARCH_KEY'
-              value: listAdminKeys(search.id, '2023-11-01').primaryKey
-            }
           ]
           resources: {
             cpu: json('1')

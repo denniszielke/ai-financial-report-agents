@@ -40,7 +40,7 @@ azd up
 Get the values for some env variables
 ```
 azd env get-values | grep AZURE_ENV_NAME
-source <(azd env get-values)
+source <(azd env get-values | grep AZURE_ENV_NAME)
 ```
 
 Last but not least: deploy a dummy container in Azure Container Apps. 
