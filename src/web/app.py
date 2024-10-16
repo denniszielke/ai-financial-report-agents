@@ -40,6 +40,15 @@ st.caption("🚀 A set of financial agents that can generate, validate and itera
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+if "previous_prompt" not in st.session_state:
+    st.session_state.previous_prompt = ""
+
+if "previous_analysis" not in st.session_state:
+    st.session_state.previous_analysis = ""
+
+if "human_feedback" not in st.session_state:
+    st.session_state.human_feedback = ""
+
 for message in st.session_state.chat_history:
     if isinstance(message, HumanMessage):
         with st.chat_message("Human"):
@@ -75,13 +84,13 @@ report_length = st.sidebar.select_slider("Report Length", options=[100, 200, 300
 
 add_reviewer_prompt = st.sidebar.text_area("Reviewer Prompt",
     "You need to review the financial analyst statements, analyse the insights available and the conclusions made from these statements.\
-Put a special focus on the insights and the statements under the given specialization and based on the feedback, provide a revised version of the statements.\
+Put a special focus on the insights and the statements under the given specialization and provide concrete feedback on how this should be improved.\
 Make sure that url references are provided for the major statements. \
-Make sure that you highlight the key points of your thinking in the reasoning output.",
+Make sure that you highlight the key points of your thinking in the reasoning output. Make sure that your feedback is presented as a numbered list of recommendations.",
     height=300
 )
 
-credential = AzureKeyCredential(os.environ["AZURE_AI_SEARCH_KEY"]) if len(os.environ["AZURE_AI_SEARCH_KEY"]) > 0 else DefaultAzureCredential()
+credential = AzureKeyCredential(os.environ["AZURE_AI_SEARCH_KEY"]) if "AZURE_AI_SEARCH_KEY" in os.environ else DefaultAzureCredential()
 index_name = os.getenv("AZURE_AI_SEARCH_INDEX")
 search_client = SearchClient(
     endpoint=os.environ["AZURE_AI_SEARCH_ENDPOINT"], 
@@ -113,7 +122,6 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         model= os.getenv("AZURE_OPENAI_EMBEDDING_MODEL"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY")
     )
-    credential = AzureKeyCredential(os.environ["AZURE_AI_SEARCH_KEY"]) if len(os.environ["AZURE_AI_SEARCH_KEY"]) > 0 else DefaultAzureCredential()
 else:
     token_provider = get_bearer_token_provider(DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default")
     openai = AzureOpenAI(
@@ -139,6 +147,24 @@ else:
 
 def llm(x):
     return chat_model.invoke(x).content
+
+class Rating(BaseModel):
+    feedbackResolved: bool = Field(
+        ...,
+        description="Has the feedback been resolved in the statements",
+    )
+    reasoning: str = Field(
+        ...,
+        description="The reasoning behind the rating",
+   )  
+
+def model_rating(input) -> Rating:
+    completion = openai.beta.chat.completions.parse(
+        model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
+        messages = [{"role" : "assistant", "content" : f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct:  {input}"""}],
+        response_format = Rating)
+    
+    return completion.choices[0].message.parsed
 
 class Statement(BaseModel):
     response: str = Field(
@@ -218,41 +244,54 @@ def retrieve_information(input:str) -> str:
     ai_msg = chat_model.invoke(input).content
     
     print("found information:")
-    print(type(ai_msg))
-    print (ai_msg)
 
     return ai_msg
 
+@st.cache_data
 def load_financial_report(url: Annotated[str, "Full qualified url of the report to download. Example: https://annualreport2023.volkswagen-group.com/divisions/volkswagen-financial-services.html"]) -> str:
     """This tool loads financial reports from the web and returns the content"""
 
     doc = WebBaseLoader(url).load()[0]
     print("loaded document:")
-    print(doc)
+    # print(doc)
 
     content = "Reference: " + doc.metadata["title"] + " URL: " + url + "content: " + doc.page_content
     return content
 
 def prepare_flow(input:str) -> TypedDict:
 
-    objective = model_objective(input)
+    with st.spinner('Retrieving content..'):
 
-    reports = ""
-    reports += retrieve_information(input)
-    
-    print("report")
-    print(reports)
+        objective = model_objective(input)
+        question = ""
+        reports = ""
+        
+        if st.session_state.previous_prompt is not None:
+            question += "This was the original objective: "+ st.session_state.previous_prompt + ". I want to start over with the analysis and also include this feedback: " + objective.question
+            st.session_state.human_feedback = input
+            st.session_state.previous_prompt += objective.question
+        else:
+            question = objective.question
+            st.session_state.previous_prompt = objective.question
 
-    for url in objective.urls:
-        reports += load_financial_report(url)
+        if st.session_state.previous_analysis is not None:
+            reports += "This was the output with the previous analyis: "+ st.session_state.previous_analysis + " This is the input that was used to generate this output: "
+
+        reports += retrieve_information(input)  
+
+        for url in objective.urls:
+            reports += load_financial_report(url)
+
+    st.success("Done!")
 
     inputs = {
         "history": "",
         "insights":reports,
         "statements": "",
         'original_statements':"",
-        "specialization":objective.question,
-        'iterations':0}
+        "specialization":question,
+        'iterations':0}       
+
     return inputs
 
 def get_session_id() -> str:
@@ -267,6 +306,7 @@ if "session_id" not in st.session_state:
 st.image("diagram.png", caption="Process description")
 
 class ReportState(TypedDict):
+    all_feedback_resolved: Optional[bool] = None
     feedback: Optional[str] = None
     history: Optional[str] = None
     statements: Optional[str] = None
@@ -288,12 +328,14 @@ Your job is to write pointed and focussed feedback on the financial analyst stat
 If the statements are suitable for the provided objective, you should state that the statements are suitable for the objective and nothing needs to be changed. \
 You should also make sure that the document is structured in a way that is easy to read and understand according to the specialisation and focus requirements.\
 Your feedback should be clear and concise and should be based on the insights and the statements provided in the form of a numbered list of recommendations.\
+Your feedback should be about 500 words and be shared in the form of a numbered list of proposed changes.\
+{} \
 Insights:\n {} \
 Statements: \n {}"
 
 def handle_reviewer(state):
     print("starting reviewer ...")
-    print(state)
+    # print(state)
     history = state.get('history', '').strip()
     statements = state.get('statements', '').strip()
     insights = state.get('insights', '').strip()
@@ -301,11 +343,16 @@ def handle_reviewer(state):
     iterations = state.get('iterations','')
     messages = state.get('messages')
     print("reviewer working...")
-    feedback = model_response(reviewer_start.format(specialization, add_reviewer_prompt, insights,statements))
+
+    human_feedback = ""
+    if st.session_state.human_feedback is not None:
+        human_feedback = "Make sure that you include this feedback in your analysis: " + st.session_state.human_feedback
+
+    feedback = model_response(reviewer_start.format(specialization, add_reviewer_prompt, human_feedback, insights,statements))
     
     if iterations > 0:
         st.info('This is iteration ' + str(iterations), icon="ℹ️")
-        messages.append(AIMessage(content="Reviewer (" + str(feedback.certainty) +  "): "+feedback.reasoning))
+        messages.append(AIMessage(content="Reviewer (" + str(feedback.certainty) +  "): "+feedback.reasoning + " \n\n My Feedback: \n\n " + feedback.response))
     print("reviewer done")
     print(feedback)
 
@@ -321,7 +368,7 @@ Your output should not exceed {} words."
 
 def handle_analyst(state):
     print("starting analyst...")
-    print(state)
+    # print(state)
     history = state.get('history', '').strip()
     feedback = state.get('feedback', '').strip()
     insights = state.get('insights', '').strip()
@@ -335,7 +382,7 @@ def handle_analyst(state):
 
     if iterations > 0:
         st.info('This is iteration ' + str(iterations), icon="ℹ️")
-        messages.append(AIMessage(content="Analyst (" + str(analsis.certainty) +  "): "+analsis.reasoning))
+        messages.append(AIMessage(content="Analyst (" + str(analsis.certainty) +  "): \n\n "+analsis.reasoning))
         messages.append(SystemMessage(content=statements))
 
     print("analyst done")
@@ -364,23 +411,34 @@ def handle_result(state):
 
     messages.append(SystemMessage(content=code1))
 
-    st.info('This is iteration ' + str(iterations), icon="ℹ️")
-
     return {'rating':rating,'code_compare':statements_compare, 'iterations':iterations, 'messages':messages}
+
+classify_feedback_start = "Are most of the important feedback points mentioned resolved in the statements? Output just Yes or No with a reason.\
+Statements: \n {} \n Feedback: \n {} \n"
+
+def classify_feedback(state):
+    print("Classifying feedback...")
+    # print(state)
+    rating = model_rating(classify_feedback_start.format(state.get('statements'),state.get('feedback')))
+
+    state['all_feedback_resolved'] = rating.feedbackResolved
+    messages = state.get('messages')
+    messages.append(AIMessage(content="Feedback resolved: "+ str(rating.feedbackResolved) + " \n\n Reasoning: "+rating.reasoning))
+    state['messages'] = messages
+
+    return state
 
 # Define the nodes we will cycle between
 workflow.add_node("handle_reviewer",handle_reviewer)
 workflow.add_node("handle_analyst",handle_analyst)
 workflow.add_node("handle_result",handle_result)
-
-
-classify_feedback = "Are most of the important feedback points mentioned resolved in the statements? Output just Yes or No.\
-Statements: \n {} \n Feedback: \n {} \n"
+workflow.add_node("classify_feedback",classify_feedback)
 
 def deployment_ready(state):
-    deployment_ready = 1 if 'yes' in llm(classify_feedback.format(state.get('statements'),state.get('feedback'))) else 0
+    deployment_ready = state['all_feedback_resolved']
+    print("Deployment ready: " + str(deployment_ready))
     total_iterations = 1 if state.get('iterations')>5 else 0
-    print(state);
+    # print(state)
     if state.get('iterations')>loops:
         print("Iterations exceeded")
         return "handle_result"
@@ -388,7 +446,7 @@ def deployment_ready(state):
 
 
 workflow.add_conditional_edges(
-    "handle_reviewer",
+    "classify_feedback",
     deployment_ready,
     {
         "handle_result": "handle_result",
@@ -398,6 +456,7 @@ workflow.add_conditional_edges(
 
 workflow.set_entry_point("handle_analyst")
 workflow.add_edge('handle_analyst', "handle_reviewer")
+workflow.add_edge('handle_reviewer', "classify_feedback")
 workflow.add_edge('handle_result', END)
 
 # Compile
@@ -414,15 +473,11 @@ if human_query is not None and human_query != "":
 
     config = {"recursion_limit":20}
 
-    def form_callback():
-        st.write(st.session_state.my_slider)
-        st.write(st.session_state.my_checkbox)
-
     with st.chat_message("Human"):
         st.markdown(human_query)
 
     for event in app.stream(inputs, config):   
-        print ("message: ")
+        print ("message TO streamlit: ")
         for value in event.values():
             if ( value["messages"].__len__() > 0 ):
                 for message in value["messages"]:
@@ -432,15 +487,10 @@ if human_query is not None and human_query != "":
                         if ( isinstance(message, AIMessage) ):
                             with st.chat_message("AI"):
                                 st.write(message.content)
-                                st.feedback(options="thumbs", key=key+ "rating", on_change=form_callback)
-                                st.text_input("Feedback", key=key + "text", max_chars=300, on_change=form_callback)
                         elif ( isinstance(message, SystemMessage) ):
                             with st.chat_message("human"):
                                 st.write(message.content)
-                                st.feedback(options="thumbs", key=key+ "rating", on_change=form_callback)
-                                st.text_input("Feedback", key=key + "text", max_chars=300, on_change=form_callback)
+                                st.session_state.previous_analysis = message.content
                         else:
                             with st.chat_message("Agent"):
-                                st.write(message.content)
-                                st.feedback(options="thumbs", key=key)
-        
+                                st.write(message.content)        

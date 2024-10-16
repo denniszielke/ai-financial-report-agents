@@ -89,6 +89,10 @@ resource app 'Microsoft.App/containerApps@2023-04-01-preview' = {
               name: 'AZURE_AI_SEARCH_ENDPOINT'
               value: 'https://${search.name}.search.windows.net'
             }
+            {
+              name: 'AZURE_AI_SEARCH_INDEX'
+              value: 'companies'
+            }
           ]
           resources: {
             cpu: json('1')
