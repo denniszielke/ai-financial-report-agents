@@ -195,7 +195,7 @@ class Objective(BaseModel):
 def model_objective(input) -> Objective:
     completion = openai.beta.chat.completions.parse(
         model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-        messages = [{"role" : "assistant", "content" : f"""Extract all the urls in the following input and the objective that was asked in the form of a question. Input: {input}"""}],
+        messages = [{"role" : "assistant", "content" : f"""Extract all the urls in the following input and the objective that was asked in the form of a question. Ignore all the urls that end with pdf. Input: {input}"""}],
         response_format = Objective)
     
     print(completion)
@@ -229,7 +229,7 @@ def search_for_company(question: str) -> str:
     print(found_docs)
     found_docs_as_text = " "
     for doc in found_docs:   
-        print(doc) 
+        # print(doc) 
         found_docs_as_text += " "+ "Title: {}".format(doc["title"]) +" "+ "Content: {}".format(doc["content"]) +" "+ "Url: {}".format(doc["url"]) +" "
 
     return found_docs_as_text
@@ -253,7 +253,7 @@ def load_financial_report(url: Annotated[str, "Full qualified url of the report 
 
     doc = WebBaseLoader(url).load()[0]
     print("loaded document:")
-    # print(doc)
+    print(url)
 
     content = "Reference: " + doc.metadata["title"] + " URL: " + url + "content: " + doc.page_content
     return content
