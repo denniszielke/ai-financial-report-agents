@@ -386,7 +386,7 @@ def handle_analyst(state):
         analsis = model_response(analyst_start.format(specialization,add_analyst_prompt, feedback,statements,insights,report_length))
 
     st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
-    messages.append(AIMessage(name="Analyst (gpt-4 - v0.2)", content= "My reasoning:  \n\n "+ analsis.reasoning + " \n\n My Statements: \n\n " + statements))
+    messages.append(AIMessage(name="Analyst (gpt-4 - v0.2)", content= "My reasoning:  \n\n "+ analsis.reasoning + " \n\n My Statements: \n\n " + analsis.response))
     # messages.append(SystemMessage(content=statements))
 
     print("analyst done")
