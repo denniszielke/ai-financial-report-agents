@@ -34,9 +34,6 @@ st.set_page_config(
     page_title="AI financial analyst agents",
 )
 
-st.title("💬 Agentic Finanical Analysts")
-st.caption("🚀 A set of financial agents that can generate, validate and iterate on financial statements")
-
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
@@ -65,12 +62,14 @@ for message in st.session_state.chat_history:
 
 # Using object notation
 
+st.sidebar.title("Agents prompts")
+
 focus = st.sidebar.text_area("Focus in", 
     "variable market dynamics, customer demographics and long running trends across segments and geographical regions",
     height=150
 )
 
-loops = st.sidebar.slider("Number of iterations", min_value=2, max_value=10, value=3, step=1)
+loops = st.sidebar.slider("Maximum number of iterations", min_value=2, max_value=10, value=3, step=1)
 
 add_analyst_prompt = st.sidebar.text_area("Analyst Prompt",
     "Analyse the financial statements of the company and provide valuable insights for market opportunities and unique challenges.\
@@ -195,7 +194,7 @@ class Objective(BaseModel):
 def model_objective(input) -> Objective:
     completion = openai.beta.chat.completions.parse(
         model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-        messages = [{"role" : "assistant", "content" : f"""Extract all the urls in the following input and the objective that was asked in the form of a question. Ignore all the urls that end with pdf. Input: {input}"""}],
+        messages = [{"role" : "assistant", "content" : f"""Extract all the urls in the following input and the objective that was asked in the form of a question. Ignore all the urls that end with pdf. Do not generate new urls that are not in the input. Input: {input}"""}],
         response_format = Objective)
     
     print(completion)
@@ -226,7 +225,7 @@ def search_for_company(question: str) -> str:
 
     print("found docs:")
 
-    print(found_docs)
+    # print(found_docs)
     found_docs_as_text = " "
     for doc in found_docs:   
         # print(doc) 
@@ -259,30 +258,37 @@ def load_financial_report(url: Annotated[str, "Full qualified url of the report 
     return content
 
 def prepare_flow(input:str) -> TypedDict:
+    
+    downloadbar = st.progress(0, "Retrieving content..")
 
-    with st.spinner('Retrieving content..'):
+    objective = model_objective(input)
+    question = ""
+    reports = ""
+    
+    if st.session_state.previous_prompt is not None:
+        question += "This was the original objective: "+ st.session_state.previous_prompt + ". I want to start over with the analysis and also include this feedback: " + objective.question
+        st.session_state.human_feedback = input
+        st.session_state.previous_prompt += objective.question
+    else:
+        question = objective.question
+        st.session_state.previous_prompt = objective.question
 
-        objective = model_objective(input)
-        question = ""
-        reports = ""
-        
-        if st.session_state.previous_prompt is not None:
-            question += "This was the original objective: "+ st.session_state.previous_prompt + ". I want to start over with the analysis and also include this feedback: " + objective.question
-            st.session_state.human_feedback = input
-            st.session_state.previous_prompt += objective.question
-        else:
-            question = objective.question
-            st.session_state.previous_prompt = objective.question
+    if st.session_state.previous_analysis is not None:
+        reports += "This was the output with the previous analyis: "+ st.session_state.previous_analysis + " This is the input that was used to generate this output: "
 
-        if st.session_state.previous_analysis is not None:
-            reports += "This was the output with the previous analyis: "+ st.session_state.previous_analysis + " This is the input that was used to generate this output: "
+    reports += retrieve_information(input)  
 
-        reports += retrieve_information(input)  
+    if objective.urls and len(objective.urls) > 0:
+        status = round(100/len(objective.urls))
+        counter = 1
 
         for url in objective.urls:
+            currentstatus = counter * status
+            downloadbar.progress(currentstatus, "Downloading content from " + url + "...")
             reports += load_financial_report(url)
+            counter = counter + 1
 
-    st.success("Done!")
+    downloadbar.empty()
 
     inputs = {
         "history": "",
@@ -301,9 +307,7 @@ def get_session_id() -> str:
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = get_session_id()
     print("started new session: " + st.session_state["session_id"])
-    st.write("You are running in session: " + st.session_state["session_id"])
-
-st.image("diagram.png", caption="Process description")
+    # st.write("You are running in session: " + st.session_state["session_id"])
 
 class ReportState(TypedDict):
     all_feedback_resolved: Optional[bool] = None
@@ -348,13 +352,13 @@ def handle_reviewer(state):
     if st.session_state.human_feedback is not None:
         human_feedback = "Make sure that you include this feedback in your analysis: " + st.session_state.human_feedback
 
-    feedback = model_response(reviewer_start.format(specialization, add_reviewer_prompt, human_feedback, insights,statements))
-    
-    if iterations > 0:
-        st.info('This is iteration ' + str(iterations), icon="ℹ️")
-        messages.append(AIMessage(content="Reviewer (" + str(feedback.certainty) +  "): "+feedback.reasoning + " \n\n My Feedback: \n\n " + feedback.response))
+    with st.spinner('Reviewer checking content..'):   
+        feedback = model_response(reviewer_start.format(specialization, add_reviewer_prompt, human_feedback, insights,statements))
+
+    st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
+    messages.append(AIMessage(name="Reviewer (gpt-4o - v0.1)", content= "My reasoning:  \n\n " + feedback.reasoning + " \n\n My Feedback: \n\n " + feedback.response))
     print("reviewer done")
-    print(feedback)
+    # print(feedback)
 
     return {'history':history+"\n REVIEWER:\n"+feedback.response,'feedback':feedback.response,'iterations':iterations+1, 'insights': insights, 'messages':messages}
 
@@ -378,12 +382,12 @@ def handle_analyst(state):
     messages = state.get('messages')
     print("analyst rewriting...")
     
-    analsis = model_response(analyst_start.format(specialization,add_analyst_prompt, feedback,statements,insights,report_length))
+    with st.spinner('Analyst generating content..'):
+        analsis = model_response(analyst_start.format(specialization,add_analyst_prompt, feedback,statements,insights,report_length))
 
-    if iterations > 0:
-        st.info('This is iteration ' + str(iterations), icon="ℹ️")
-        messages.append(AIMessage(content="Analyst (" + str(analsis.certainty) +  "): \n\n "+analsis.reasoning))
-        messages.append(SystemMessage(content=statements))
+    st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
+    messages.append(AIMessage(name="Analyst (gpt-4 - v0.2)", content= "My reasoning:  \n\n "+ analsis.reasoning + " \n\n My Statements: \n\n " + statements))
+    # messages.append(SystemMessage(content=statements))
 
     print("analyst done")
     return {'history':history+'\n STATEMENTS:\n'+analsis.response,'statements':analsis.response, 'iterations':iterations, 'insights': insights, 'messages':messages}
@@ -401,15 +405,14 @@ def handle_result(state):
     code2 = state.get('original_statements', '').strip()
     messages = state.get('messages')
     iterations = state.get('iterations','')
-    rating  = model_response(rating_start.format(history))
     
-    messages.append(AIMessage(content="Rating (" + str(rating.certainty) +  "): "+rating.reasoning))
+    with st.spinner('Checking if the statements are suitable for the objective..'):
+        rating  = model_response(rating_start.format(history))
+        messages.append(AIMessage(name="Inspector (gpt-4 - v0.2)", content="Rating (" + str(rating.certainty) +  "): "+rating.reasoning))
 
-    statements_compare = llm(statement_comparison.format(code1,code2))
-
-    messages.append(AIMessage(content="Result: "+statements_compare))
-
-    messages.append(SystemMessage(content=code1))
+        statements_compare = llm(statement_comparison.format(code1,code2))
+        # messages.append(AIMessage(name="Result", content=statements_compare))
+        messages.append(SystemMessage(content=code1))
 
     return {'rating':rating,'code_compare':statements_compare, 'iterations':iterations, 'messages':messages}
 
@@ -418,12 +421,13 @@ Statements: \n {} \n Feedback: \n {} \n"
 
 def classify_feedback(state):
     print("Classifying feedback...")
-    # print(state)
-    rating = model_rating(classify_feedback_start.format(state.get('statements'),state.get('feedback')))
-
+    
+    with st.spinner('Inspector checking if the feedback from the reviewer has been implemented..'):
+        rating = model_rating(classify_feedback_start.format(state.get('statements'),state.get('feedback')))   
+    
     state['all_feedback_resolved'] = rating.feedbackResolved
     messages = state.get('messages')
-    messages.append(AIMessage(content="Feedback resolved: "+ str(rating.feedbackResolved) + " \n\n Reasoning: "+rating.reasoning))
+    messages.append(AIMessage(name= "Inspector (gpt-4o-mini - v0.1)", content="Feedback resolved: " + str(rating.feedbackResolved) + " \n\n Reasoning: "+rating.reasoning))
     state['messages'] = messages
 
     return state
@@ -463,18 +467,24 @@ workflow.add_edge('handle_result', END)
 
 app = workflow.compile()
 
-human_query = st.chat_input()
+st.title("💬 Agentic Finanical Analysts")
+st.caption("🚀 An agentic financial copilot that can research, generate, validate and iterate on financial statements")
+st.write("<br>", unsafe_allow_html=True)
+st.image("diagram.svg", caption="Process description of the financial analyst agents", use_column_width=True)
+st.write("<br>", unsafe_allow_html=True)
+human_query = st.chat_input("Type your analyst input prompt here...", key="human_query")
 
 if human_query is not None and human_query != "":
 
     st.session_state.chat_history.append(HumanMessage(human_query))
-
-    inputs = prepare_flow(human_query)
+    with st.spinner('Researcher preparing briefing package...'):
+        inputs = prepare_flow(human_query)
+    st.success("Briefing package created!")
 
     config = {"recursion_limit":20}
 
     with st.chat_message("Human"):
-        st.markdown(human_query)
+        st.write(human_query)
 
     for event in app.stream(inputs, config):   
         print ("message TO streamlit: ")
@@ -484,13 +494,16 @@ if human_query is not None and human_query != "":
                     if (message.content.__len__() > 0):
                         ticks = time.time()    
                         key = message.id + "-" + str(ticks)
-                        if ( isinstance(message, AIMessage) ):
-                            with st.chat_message("AI"):
-                                st.write(message.content)
-                        elif ( isinstance(message, SystemMessage) ):
+
+                        if ( isinstance(message, SystemMessage) ):
                             with st.chat_message("human"):
                                 st.write(message.content)
                                 st.session_state.previous_analysis = message.content
                         else:
-                            with st.chat_message("Agent"):
-                                st.write(message.content)        
+                            if ( isinstance(message, AIMessage) ):
+                                with st.expander(message.name, expanded=False):
+                                    with st.chat_message("AI"):
+                                        st.write(message.content)
+                            else:
+                                with st.chat_message("Agent"):
+                                    st.write(message.content)  

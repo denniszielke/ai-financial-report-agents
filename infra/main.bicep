@@ -25,8 +25,9 @@ param searchIndexName string = 'search-index'
 param completionDeploymentModelName string = 'gpt-4o'
 param completionModelName string = 'gpt-4o'
 param completionModelVersion string = '2024-08-06'
-param embeddingDeploymentModelName string = 'text-embedding-3-small'
-param embeddingModelName string = 'text-embedding-3-small'
+param embeddingDeploymentModelName string = 'text-embedding-ada-002'
+param embeddingModelName string = 'text-embedding-ada-002'
+param embeddingModelVersion string = '2'
 param openaiApiVersion string = '2024-02-01'
 param openaiCapacity int = 50
 param modelDeployments array = [
@@ -43,7 +44,7 @@ param modelDeployments array = [
     model: {
       format: 'OpenAI'
       name: embeddingModelName
-      version: '1'
+      version: embeddingModelVersion
     }
   }
 ]
