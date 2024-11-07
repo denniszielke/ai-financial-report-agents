@@ -467,8 +467,11 @@ workflow.add_edge('handle_result', END)
 
 app = workflow.compile()
 
-st.title("💬 Agentic Finanical Analysts")
-st.caption("🚀 An agentic financial copilot that can research, generate, validate and iterate on financial statements")
+st.title("💬 Agentic Finanical Copilot")
+# st.caption("🚀 An agentic financial copilot that can research, generate, validate and iterate on financial statements")
+st.html(
+    "<p><span style=''>🚀 An agentic copilot that can research, generate, validate and iterate on financial statements. <a href='https://github.com/denniszielke/ai-financial-report-agents'>GitHub</a></span></p>"
+)
 st.write("<br>", unsafe_allow_html=True)
 st.image("diagram.svg", caption="Process description of the financial analyst agents", use_column_width=True)
 st.write("<br>", unsafe_allow_html=True)

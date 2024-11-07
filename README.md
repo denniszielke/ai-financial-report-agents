@@ -12,7 +12,7 @@ These are the roles:
 - Researcher: Will retrieve and enhance the content that is referenced by the user and will forward the talks and materials to the analyst.
 - Analyst: Will write a draft of a possible solution to the objective based on the materials available and will forward his work results along with its internal reasoning and references to the reviewer.
 - Reviewer: Will validate if the analyst has solved the objective in the quality, completeness and correctness based on the materials available. He will write feedback based on his findings to the analyst.
-- Rater: Will judge if the Analyst has incorporated the feedback by the Reviewer and ensure that the quality of the work output and metadata improves over the iterations.
+- Inspector: Will judge if the Analyst has incorporated the feedback by the Reviewer and ensure that the quality of the work output and metadata improves over the iterations.
 
 Regions that this deployment can be executed:
 - uksouth
