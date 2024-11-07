@@ -188,16 +188,22 @@ def model_response(input) -> Statement:
     return completion.choices[0].message.parsed
 
 class Objective(BaseModel):
-    urls: List[str]
-    question: str
+    urls: List[str] = Field(
+        ...,
+        description="A list of urls that were extracted from the input",
+    )
+    question: str = Field(
+        ...,
+        description="The question that was asked in the form of a question",
+    )
 
 def model_objective(input) -> Objective:
     completion = openai.beta.chat.completions.parse(
         model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-        messages = [{"role" : "assistant", "content" : f"""Extract all the urls in the following input and the objective that was asked in the form of a question. Ignore all the urls that end with pdf. Do not generate new urls that are not in the input. Input: {input}"""}],
+        messages = [{"role" : "assistant", "content" : f"""Extract all the urls in the following input and the objective that was asked in the form of a question. 
+                     Ignore all the urls that end with pdf. Do not generate new urls that are not in the input. Input: {input}"""}],
         response_format = Objective)
     
-    print(completion)
     return completion.choices[0].message.parsed
 
 def get_embedding(text, embeddingsmodel=embeddings_model):

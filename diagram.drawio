@@ -167,13 +167,13 @@
                 <mxCell id="123" value="Approve" style="shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=1;aspect=fixed;image=data:image/svg+xml,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOSAxNCI+PHBhdGggZmlsbD0iIzg5YzQwMiIgZD0iTTcuNzM1IDEzLjc4OEwuNjA2IDYuODYzbDIuNzg4LTIuODY5IDQuMzQxIDQuMjE4TDE1LjYwNi41NjVsMi43ODggMi44N0w3LjczNSAxMy43ODh6Ii8+PC9zdmc+;rounded=0;labelBackgroundColor=default;" parent="1" vertex="1">
                     <mxGeometry x="275.53212765957454" y="210" width="38.297872340425535" height="38.297872340425535" as="geometry"/>
                 </mxCell>
-                <mxCell id="124" value="Protocoll" style="sketch=0;pointerEvents=1;shadow=0;dashed=0;html=1;strokeColor=none;fillColor=#434445;aspect=fixed;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;align=center;outlineConnect=0;shape=mxgraph.vvd.log_files;" vertex="1" parent="1">
+                <mxCell id="124" value="Protocoll" style="sketch=0;pointerEvents=1;shadow=0;dashed=0;html=1;strokeColor=none;fillColor=#434445;aspect=fixed;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;align=center;outlineConnect=0;shape=mxgraph.vvd.log_files;" parent="1" vertex="1">
                     <mxGeometry x="190" y="100" width="40" height="50" as="geometry"/>
                 </mxCell>
-                <mxCell id="128" style="edgeStyle=none;html=1;" edge="1" parent="1" source="127" target="68">
+                <mxCell id="128" style="edgeStyle=none;html=1;" parent="1" source="127" target="68" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="127" value="Documents" style="aspect=fixed;html=1;points=[];align=center;image;fontSize=12;image=img/lib/azure2/general/Files.svg;" vertex="1" parent="1">
+                <mxCell id="127" value="Documents" style="aspect=fixed;html=1;points=[];align=center;image;fontSize=12;image=img/lib/azure2/general/Files.svg;" parent="1" vertex="1">
                     <mxGeometry x="44.449999999999974" y="130" width="32.92" height="36" as="geometry"/>
                 </mxCell>
             </root>

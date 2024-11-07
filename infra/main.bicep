@@ -25,6 +25,9 @@ param searchIndexName string = 'search-index'
 param completionDeploymentModelName string = 'gpt-4o'
 param completionModelName string = 'gpt-4o'
 param completionModelVersion string = '2024-08-06'
+param smallcompletionDeploymentModelName string = 'gpt-4o-mini'
+param smallcompletionModelName string = 'gpt-4o-mini'
+param smallcompletionModelVersion string = '2024-07-18'
 param embeddingDeploymentModelName string = 'text-embedding-ada-002'
 param embeddingModelName string = 'text-embedding-ada-002'
 param embeddingModelVersion string = '2'
@@ -37,6 +40,14 @@ param modelDeployments array = [
       format: 'OpenAI'
       name: completionModelName
       version: completionModelVersion
+    }
+  }
+  {
+    name: smallcompletionDeploymentModelName
+    model: {
+      format: 'OpenAI'
+      name: smallcompletionModelName
+      version: smallcompletionModelVersion
     }
   }
   {
@@ -126,6 +137,9 @@ output AZURE_OPENAI_API_KEY string = openai.outputs.openaiKey
 output AZURE_OPENAI_ENDPOINT string = openai.outputs.openaiEndpoint
 output AZURE_OPENAI_COMPLETION_MODEL string = completionModelName
 output AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME string = completionDeploymentModelName
+output AZURE_OPENAI_SMALL_COMPLETION_MODEL string = smallcompletionModelName
+output AZURE_OPENAI_SMALL_COMPLETION_DEPLOYMENT_NAME string = smallcompletionDeploymentModelName
+output AZURE_OPENAI_SMALL_COMPLETION_MODEL_VERSION string = smallcompletionModelVersion
 output AZURE_OPENAI_EMBEDDING_MODEL string = embeddingModelName
 output AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME string = embeddingDeploymentModelName
 output AZURE_AI_SEARCH_NAME string = search.outputs.searchName
