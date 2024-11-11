@@ -7,13 +7,9 @@ from azure.search.documents import SearchClient
 import streamlit as st
 import random
 from langchain_community.document_loaders import WebBaseLoader
-from langchain_qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams
 from langchain_openai import AzureChatOpenAI
-from openai import AzureOpenAI
 from langchain_openai import AzureOpenAIEmbeddings
-
+from openai import AzureOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from pydantic import BaseModel, Field
 from pydantic.dataclasses import dataclass
@@ -28,11 +24,43 @@ from azure.search.documents.models import (
 )
 from langchain_core.tools import tool
 
+# enable langchain instrumentation
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.instrumentation.langchain import LangchainInstrumentor
+from opentelemetry import trace, trace as trace_api
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from token_counter import TokenCounterCallback
+
 dotenv.load_dotenv()
 
 st.set_page_config(
     page_title="AI financial analyst agents",
 )
+
+
+instrumentor = LangchainInstrumentor()
+
+@st.cache_resource
+def setup_tracing():
+
+    # resource = Resource(attributes={
+    #     "service.name": "ai.financial.agents"
+    # })
+
+    # trace.set_tracer_provider(TracerProvider(resource=resource))
+    otlp_exporter = OTLPSpanExporter()
+    tracer_provider = TracerProvider()
+    # trace.set_tracer_provider(tracer_provider)
+    tracer = trace.get_tracer(__name__)
+    span_processor = BatchSpanProcessor(otlp_exporter, schedule_delay_millis=60000)
+    trace.get_tracer_provider().add_span_processor(span_processor)
+    if not instrumentor.is_instrumented_by_opentelemetry:
+        instrumentor.instrument()
+    return tracer
+
+tracer = setup_tracing()
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -97,6 +125,8 @@ search_client = SearchClient(
     credential=credential
 )
 
+callback = TokenCounterCallback()
+
 chat_model: AzureChatOpenAI = None
 openai: AzureOpenAI = None
 embeddings_model: AzureOpenAIEmbeddings = None
@@ -105,7 +135,7 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
     openai = AzureOpenAI(
         api_key = os.getenv("AZURE_OPENAI_API_KEY"),  
         api_version = "2024-08-01-preview",
-        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT"),
     )
     chat_model = AzureChatOpenAI(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
@@ -113,7 +143,8 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         azure_deployment=os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
-        streaming=True
+        streaming=True,
+        # callbacks=[callback]
     )
     embeddings_model = AzureOpenAIEmbeddings(    
         azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
@@ -126,7 +157,7 @@ else:
     openai = AzureOpenAI(
         azure_ad_token_provider=token_provider,
         api_version = "2024-08-01-preview",
-        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT"),
     )
     chat_model = AzureChatOpenAI(
         azure_ad_token_provider=token_provider,
@@ -135,7 +166,8 @@ else:
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
         openai_api_type="azure_ad",
-        streaming=True
+        streaming=True,
+        # callbacks=[callback]
     )
     embeddings_model = AzureOpenAIEmbeddings(    
         azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
@@ -148,6 +180,7 @@ def llm(x):
     return chat_model.invoke(x).content
 
 class Rating(BaseModel):
+    '''Rating of the feedback'''
     feedbackResolved: bool = Field(
         ...,
         description="Has the feedback been resolved in the statements",
@@ -158,14 +191,18 @@ class Rating(BaseModel):
    )  
 
 def model_rating(input) -> Rating:
-    completion = openai.beta.chat.completions.parse(
-        model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-        messages = [{"role" : "assistant", "content" : f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct:  {input}"""}],
-        response_format = Rating)
+    rating_model = chat_model.with_structured_output(Rating)
+    rating_prompt = f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct:  {input}"""
+    completion = rating_model.invoke(rating_prompt)
+    # completion = openai.beta.chat.completions.parse(
+    #     model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
+    #     messages = [{"role" : "assistant", "content" : f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct:  {input}"""}],
+    #     response_format = Rating)
     
-    return completion.choices[0].message.parsed
+    return completion
 
 class Statement(BaseModel):
+    '''Statement response to a question with the reasoning and certainty'''
     response: str = Field(
         ...,
         description="The response to the question",
@@ -180,14 +217,18 @@ class Statement(BaseModel):
     )
 
 def model_response(input) -> Statement:
-    completion = openai.beta.chat.completions.parse(
-        model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-        messages = [{"role" : "assistant", "content" : f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct and a rating on the certainty on the correctness of the response:  {input}"""}],
-        response_format = Statement)
+    statement_model = chat_model.with_structured_output(Statement)
+    statement_prompt = f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct and a rating on the certainty on the correctness of the response:  {input}"""
+    completion = statement_model.invoke(statement_prompt)
+    # completion = openai.beta.chat.completions.parse(
+    #     model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
+    #     messages = [{"role" : "assistant", "content" : f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct and a rating on the certainty on the correctness of the response:  {input}"""}],
+    #     response_format = Statement)
     
-    return completion.choices[0].message.parsed
+    return completion #.choices[0].message.parsed
 
 class Objective(BaseModel):
+    '''Objective of the model to extract urls and the question'''
     urls: List[str] = Field(
         ...,
         description="A list of urls that were extracted from the input",
@@ -198,13 +239,17 @@ class Objective(BaseModel):
     )
 
 def model_objective(input) -> Objective:
-    completion = openai.beta.chat.completions.parse(
-        model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-        messages = [{"role" : "assistant", "content" : f"""Extract all the urls in the following input and the objective that was asked in the form of a question. 
-                     Ignore all the urls that end with pdf. Do not generate new urls that are not in the input. Input: {input}"""}],
-        response_format = Objective)
+    objective_model = chat_model.with_structured_output(Objective)
+    objective_prompt = f"""Extract all the urls in the following input and the objective that was asked in the form of a question. Ignore all the urls that end with pdf. Do not generate new urls that are not in the input. Input: {input}"""
+    completion = objective_model.invoke(objective_prompt)
+
+    # completion = openai.beta.chat.completions.parse(
+    #     model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
+    #     messages = [{"role" : "assistant", "content" : f"""Extract all the urls in the following input and the objective that was asked in the form of a question. 
+    #                  Ignore all the urls that end with pdf. Do not generate new urls that are not in the input. Input: {input}"""}],
+    #     response_format = Objective)
     
-    return completion.choices[0].message.parsed
+    return completion #.choices[0].message.parsed
 
 def get_embedding(text, embeddingsmodel=embeddings_model):
     if len(text) == 0:
@@ -303,6 +348,9 @@ def prepare_flow(input:str) -> TypedDict:
         'original_statements':"",
         "specialization":question,
         'iterations':0}       
+
+    print("inputs:")
+    print(inputs)
 
     return inputs
 
@@ -495,24 +543,28 @@ if human_query is not None and human_query != "":
     with st.chat_message("Human"):
         st.write(human_query)
 
-    for event in app.stream(inputs, config):   
-        print ("message TO streamlit: ")
-        for value in event.values():
-            if ( value["messages"].__len__() > 0 ):
-                for message in value["messages"]:
-                    if (message.content.__len__() > 0):
-                        ticks = time.time()    
-                        key = message.id + "-" + str(ticks)
+    with tracer.start_as_current_span("agent-chain") as span:
+        for event in app.stream(inputs, config):   
+            print ("message TO streamlit: ")
+            for value in event.values():
+                if ( value["messages"].__len__() > 0 ):
+                    for message in value["messages"]:
+                        if (message.content.__len__() > 0):
+                            ticks = time.time()    
+                            key = message.id + "-" + str(ticks)
 
-                        if ( isinstance(message, SystemMessage) ):
-                            with st.chat_message("human"):
-                                st.write(message.content)
-                                st.session_state.previous_analysis = message.content
-                        else:
-                            if ( isinstance(message, AIMessage) ):
-                                with st.expander(message.name, expanded=False):
-                                    with st.chat_message("AI"):
-                                        st.write(message.content)
+                            if ( isinstance(message, SystemMessage) ):
+                                with st.chat_message("human"):
+                                    st.write(message.content)
+                                    st.session_state.previous_analysis = message.content
                             else:
-                                with st.chat_message("Agent"):
-                                    st.write(message.content)  
+                                if ( isinstance(message, AIMessage) ):
+                                    with st.expander(message.name, expanded=False):
+                                        with st.chat_message("AI"):
+                                            st.write(message.content)
+                                else:
+                                    with st.chat_message("Agent"):
+                                        st.write(message.content)
+        # span.set_attribute("gen_ai.response.completion_token",callback.completion_tokens) 
+        # span.set_attribute("gen_ai.response.prompt_tokens", callback.prompt_tokens) 
+        # span.set_attribute("gen_ai.response.total_tokens", callback.total_tokens)

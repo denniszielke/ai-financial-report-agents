@@ -14,3 +14,9 @@ langchain-qdrant==0.1.4
 langgraph==0.2.29
 langgraph-checkpoint==1.0.13
 beautifulsoup4==4.12.3
+opentelemetry-instrumentation-langchain==0.33.11
+opentelemetry-instrumentation==0.49b1
+opentelemetry-semantic-conventions-ai==0.4.2
+opentelemetry-distro[otlp]==0.49b1
+openinference-instrumentation-langchain==0.1.29
+opentelemetry-exporter-otlp
