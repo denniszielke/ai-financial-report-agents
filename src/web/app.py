@@ -32,6 +32,7 @@ from opentelemetry.instrumentation.langchain import LangchainInstrumentor
 from opentelemetry import trace, trace as trace_api
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from token_counter import TokenCounterCallback
+from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
 
 dotenv.load_dotenv()
 
@@ -39,22 +40,18 @@ st.set_page_config(
     page_title="AI financial analyst agents",
 )
 
-
 instrumentor = LangchainInstrumentor()
 
 @st.cache_resource
 def setup_tracing():
 
-    # resource = Resource(attributes={
-    #     "service.name": "ai.financial.agents"
-    # })
-
-    # trace.set_tracer_provider(TracerProvider(resource=resource))
-    otlp_exporter = OTLPSpanExporter()
+    exporter = AzureMonitorTraceExporter.from_connection_string(
+        os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"]
+    )
     tracer_provider = TracerProvider()
-    # trace.set_tracer_provider(tracer_provider)
+    trace.set_tracer_provider(tracer_provider)
     tracer = trace.get_tracer(__name__)
-    span_processor = BatchSpanProcessor(otlp_exporter, schedule_delay_millis=60000)
+    span_processor = BatchSpanProcessor(exporter, schedule_delay_millis=60000)
     trace.get_tracer_provider().add_span_processor(span_processor)
     if not instrumentor.is_instrumented_by_opentelemetry:
         instrumentor.instrument()
@@ -148,7 +145,7 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
     )
     embeddings_model = AzureOpenAIEmbeddings(    
         azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
-        openai_api_version = os.getenv("AZURE_OPENAI_VERSION"),
+        openai_api_version = "2024-08-01-preview", # os.getenv("AZURE_OPENAI_VERSION"),
         model= os.getenv("AZURE_OPENAI_EMBEDDING_MODEL"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY")
     )
@@ -163,7 +160,7 @@ else:
         azure_ad_token_provider=token_provider,
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         azure_deployment=os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-        openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
+        openai_api_version= "2024-08-01-preview", #os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
         openai_api_type="azure_ad",
         streaming=True,
@@ -178,28 +175,6 @@ else:
 
 def llm(x):
     return chat_model.invoke(x).content
-
-class Rating(BaseModel):
-    '''Rating of the feedback'''
-    feedbackResolved: bool = Field(
-        ...,
-        description="Has the feedback been resolved in the statements",
-    )
-    reasoning: str = Field(
-        ...,
-        description="The reasoning behind the rating",
-   )  
-
-def model_rating(input) -> Rating:
-    rating_model = chat_model.with_structured_output(Rating)
-    rating_prompt = f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct:  {input}"""
-    completion = rating_model.invoke(rating_prompt)
-    # completion = openai.beta.chat.completions.parse(
-    #     model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-    #     messages = [{"role" : "assistant", "content" : f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct:  {input}"""}],
-    #     response_format = Rating)
-    
-    return completion
 
 class Statement(BaseModel):
     '''Statement response to a question with the reasoning and certainty'''
@@ -220,12 +195,8 @@ def model_response(input) -> Statement:
     statement_model = chat_model.with_structured_output(Statement)
     statement_prompt = f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct and a rating on the certainty on the correctness of the response:  {input}"""
     completion = statement_model.invoke(statement_prompt)
-    # completion = openai.beta.chat.completions.parse(
-    #     model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-    #     messages = [{"role" : "assistant", "content" : f""" Help me understand the following by giving me a response to the question, a short reasoning on why the response is correct and a rating on the certainty on the correctness of the response:  {input}"""}],
-    #     response_format = Statement)
     
-    return completion #.choices[0].message.parsed
+    return completion 
 
 class Objective(BaseModel):
     '''Objective of the model to extract urls and the question'''
@@ -242,14 +213,8 @@ def model_objective(input) -> Objective:
     objective_model = chat_model.with_structured_output(Objective)
     objective_prompt = f"""Extract all the urls in the following input and the objective that was asked in the form of a question. Ignore all the urls that end with pdf. Do not generate new urls that are not in the input. Input: {input}"""
     completion = objective_model.invoke(objective_prompt)
-
-    # completion = openai.beta.chat.completions.parse(
-    #     model = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
-    #     messages = [{"role" : "assistant", "content" : f"""Extract all the urls in the following input and the objective that was asked in the form of a question. 
-    #                  Ignore all the urls that end with pdf. Do not generate new urls that are not in the input. Input: {input}"""}],
-    #     response_format = Objective)
     
-    return completion #.choices[0].message.parsed
+    return completion
 
 def get_embedding(text, embeddingsmodel=embeddings_model):
     if len(text) == 0:
@@ -426,7 +391,7 @@ Your output should not exceed {} words."
 
 def handle_analyst(state):
     print("starting analyst...")
-    # print(state)
+
     history = state.get('history', '').strip()
     feedback = state.get('feedback', '').strip()
     insights = state.get('insights', '').strip()
@@ -441,7 +406,6 @@ def handle_analyst(state):
 
     st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
     messages.append(AIMessage(name="Analyst (gpt-4 - v0.2)", content= "My reasoning:  \n\n "+ analsis.reasoning + " \n\n My Statements: \n\n " + analsis.response))
-    # messages.append(SystemMessage(content=statements))
 
     print("analyst done")
     return {'history':history+'\n STATEMENTS:\n'+analsis.response,'statements':analsis.response, 'iterations':iterations, 'insights': insights, 'messages':messages}
@@ -470,6 +434,24 @@ def handle_result(state):
 
     return {'rating':rating,'code_compare':statements_compare, 'iterations':iterations, 'messages':messages}
 
+class Rating(BaseModel):
+    '''Rating of the feedback'''
+    feedbackResolved: bool = Field(
+        ...,
+        description="Has the feedback been resolved in the statements true or false",
+    )
+    reasoning: str = Field(
+        ...,
+        description="The reasoning behind the rating with a small explanation",
+   )  
+
+def model_rating(input) -> Rating:
+    rating_model = chat_model.with_structured_output(Rating)
+    rating_prompt = f""" Help me understand the following by giving me a response to the question,
+      a short reasoning on why the response is correct:  {input}"""
+    completion = rating_model.invoke(rating_prompt)    
+    return completion
+
 classify_feedback_start = "Are most of the important feedback points mentioned resolved in the statements? Output just Yes or No with a reason.\
 Statements: \n {} \n Feedback: \n {} \n"
 
@@ -481,37 +463,39 @@ def classify_feedback(state):
     
     state['all_feedback_resolved'] = rating.feedbackResolved
     messages = state.get('messages')
-    messages.append(AIMessage(name= "Inspector (gpt-4o-mini - v0.1)", content="Feedback resolved: " + str(rating.feedbackResolved) + " \n\n Reasoning: "+rating.reasoning))
+    messages.append(AIMessage(name= "Inspector (gpt-4o - v0.1)", content="Feedback resolved: " + str(rating.feedbackResolved) + " \n\n Reasoning: "+rating.reasoning))
     state['messages'] = messages
 
     return state
 
-# Define the nodes we will cycle between
+# Define the nodes we will cycle between different states
 workflow.add_node("handle_reviewer",handle_reviewer)
 workflow.add_node("handle_analyst",handle_analyst)
 workflow.add_node("handle_result",handle_result)
 workflow.add_node("classify_feedback",classify_feedback)
 
-def deployment_ready(state):
-    deployment_ready = state['all_feedback_resolved']
-    print("Deployment ready: " + str(deployment_ready))
+# Define the conditional edges to decide if we should continue to the next state
+def report_ready(state):
+    report_ready = state['all_feedback_resolved']
+    print("Deployment ready: " + str(report_ready))
     total_iterations = 1 if state.get('iterations')>5 else 0
     # print(state)
     if state.get('iterations')>loops:
         print("Iterations exceeded")
         return "handle_result"
-    return "handle_result" if  deployment_ready or total_iterations else "handle_analyst" 
+    return "handle_result" if  report_ready or total_iterations else "handle_analyst" 
 
-
+# Determine if the report is ready or not
 workflow.add_conditional_edges(
     "classify_feedback",
-    deployment_ready,
+    report_ready,
     {
         "handle_result": "handle_result",
         "handle_analyst": "handle_analyst"
     }
 )
 
+# Define the entry point and the end point
 workflow.set_entry_point("handle_analyst")
 workflow.add_edge('handle_analyst', "handle_reviewer")
 workflow.add_edge('handle_reviewer', "classify_feedback")

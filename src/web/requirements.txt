@@ -20,3 +20,5 @@ opentelemetry-semantic-conventions-ai==0.4.2
 opentelemetry-distro[otlp]==0.49b1
 openinference-instrumentation-langchain==0.1.29
 opentelemetry-exporter-otlp
+azure-monitor-opentelemetry-exporter==1.0.0b32
+azure-monitor-opentelemetry==1.6.4
