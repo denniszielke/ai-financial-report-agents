@@ -374,10 +374,10 @@ def handle_reviewer(state):
     with st.spinner('Reviewer checking content..'):   
         feedback = model_response(reviewer_start.format(specialization, add_reviewer_prompt, human_feedback, insights,statements))
 
-    st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
-    messages.append(AIMessage(name="Reviewer (gpt-4o - v0.1)", content= "My reasoning:  \n\n " + feedback.reasoning + " \n\n My Feedback: \n\n " + feedback.response))
-    print("reviewer done")
-    # print(feedback)
+    message_id = str(iterations) + "-reviewer-" + str(hash(feedback.response))
+
+    messages.append(AIMessage(id=message_id, name="Reviewer (gpt-4o - v0.1)", content= "My reasoning:  \n\n " + feedback.reasoning + " \n\n My Feedback: \n\n " + feedback.response))
+    print("reviewer done " + message_id)
 
     return {'history':history+"\n REVIEWER:\n"+feedback.response,'feedback':feedback.response,'iterations':iterations+1, 'insights': insights, 'messages':messages}
 
@@ -404,10 +404,11 @@ def handle_analyst(state):
     with st.spinner('Analyst generating content..'):
         analsis = model_response(analyst_start.format(specialization,add_analyst_prompt, feedback,statements,insights,report_length))
 
-    st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
-    messages.append(AIMessage(name="Analyst (gpt-4 - v0.2)", content= "My reasoning:  \n\n "+ analsis.reasoning + " \n\n My Statements: \n\n " + analsis.response))
+    ticks = time.time()
+    message_id = str(iterations) + "-analyst-" + str(ticks)
+    messages.append(AIMessage(id=message_id, name="Analyst (gpt-4 - v0.2)", content= "My reasoning:  \n\n "+ analsis.reasoning + " \n\n My Statements: \n\n " + analsis.response))
 
-    print("analyst done")
+    print("analyst done " + message_id)
     return {'history':history+'\n STATEMENTS:\n'+analsis.response,'statements':analsis.response, 'iterations':iterations, 'insights': insights, 'messages':messages}
 
 statement_comparison = "Compare the two statements and rate on a scale of 10 to both. Dont output the statements. Revised statements: \n {} \n Original statements: \n {}"
@@ -427,9 +428,8 @@ def handle_result(state):
     with st.spinner('Checking if the statements are suitable for the objective..'):
         rating  = model_response(rating_start.format(history))
         messages.append(AIMessage(name="Inspector (gpt-4 - v0.2)", content="Rating (" + str(rating.certainty) +  "): "+rating.reasoning))
-
+        
         statements_compare = llm(statement_comparison.format(code1,code2))
-        # messages.append(AIMessage(name="Result", content=statements_compare))
         messages.append(SystemMessage(content=code1))
 
     return {'rating':rating,'code_compare':statements_compare, 'iterations':iterations, 'messages':messages}
@@ -457,15 +457,18 @@ Statements: \n {} \n Feedback: \n {} \n"
 
 def classify_feedback(state):
     print("Classifying feedback...")
-    
+    iterations = state.get('iterations','')
     with st.spinner('Inspector checking if the feedback from the reviewer has been implemented..'):
         rating = model_rating(classify_feedback_start.format(state.get('statements'),state.get('feedback')))   
-    
+ 
     state['all_feedback_resolved'] = rating.feedbackResolved
     messages = state.get('messages')
-    messages.append(AIMessage(name= "Inspector (gpt-4o - v0.1)", content="Feedback resolved: " + str(rating.feedbackResolved) + " \n\n Reasoning: "+rating.reasoning))
+    ticks = time.time()
+    message_id = str(iterations) + "-inspector-" + str(ticks)
+    messages.append(AIMessage(id=message_id, name= "Inspector (gpt-4o - v0.1)", content="Feedback resolved: " + str(rating.feedbackResolved) + " \n\n Reasoning: "+rating.reasoning))
     state['messages'] = messages
-
+    st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
+    print("Inspector done " + message_id)
     return state
 
 # Define the nodes we will cycle between different states
@@ -515,6 +518,8 @@ st.image("diagram.svg", caption="Process description of the financial analyst ag
 st.write("<br>", unsafe_allow_html=True)
 human_query = st.chat_input("Type your analyst input prompt here...", key="human_query")
 
+messages = {}
+
 if human_query is not None and human_query != "":
 
     st.session_state.chat_history.append(HumanMessage(human_query))
@@ -534,8 +539,11 @@ if human_query is not None and human_query != "":
                 if ( value["messages"].__len__() > 0 ):
                     for message in value["messages"]:
                         if (message.content.__len__() > 0):
-                            ticks = time.time()    
-                            key = message.id + "-" + str(ticks)
+                            
+                            if (message.id in messages):
+                                continue
+
+                            messages[message.id] = True
 
                             if ( isinstance(message, SystemMessage) ):
                                 with st.chat_message("human"):
