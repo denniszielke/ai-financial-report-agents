@@ -113,7 +113,7 @@ if "AZURE_OPENAI_API_KEY" in os.environ:
         azure_deployment=os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT_NAME"),
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
-        streaming=True
+        streaming=False
     )
     embeddings_model = AzureOpenAIEmbeddings(    
         azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
@@ -135,7 +135,7 @@ else:
         openai_api_version=os.getenv("AZURE_OPENAI_VERSION"),
         temperature=0,
         openai_api_type="azure_ad",
-        streaming=True
+        streaming=False
     )
     embeddings_model = AzureOpenAIEmbeddings(    
         azure_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
@@ -361,8 +361,9 @@ def handle_reviewer(state):
     with st.spinner('Reviewer checking content..'):   
         feedback = model_response(reviewer_start.format(specialization, add_reviewer_prompt, human_feedback, insights,statements))
 
-    st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
-    messages.append(AIMessage(name="Reviewer (gpt-4o - v0.1)", content= "My reasoning:  \n\n " + feedback.reasoning + " \n\n My Feedback: \n\n " + feedback.response))
+    ticks = time.time()
+    message_id = str(iterations) + "-reviewer-" + str(ticks)
+    messages.append(AIMessage(id=message_id, name="Reviewer (gpt-4o - v0.1)", content= "My reasoning:  \n\n " + feedback.reasoning + " \n\n My Feedback: \n\n " + feedback.response))
     print("reviewer done")
     # print(feedback)
 
@@ -391,9 +392,9 @@ def handle_analyst(state):
     with st.spinner('Analyst generating content..'):
         analsis = model_response(analyst_start.format(specialization,add_analyst_prompt, feedback,statements,insights,report_length))
 
-    st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
-    messages.append(AIMessage(name="Analyst (gpt-4 - v0.2)", content= "My reasoning:  \n\n "+ analsis.reasoning + " \n\n My Statements: \n\n " + analsis.response))
-    # messages.append(SystemMessage(content=statements))
+    ticks = time.time()
+    message_id = str(iterations) + "-analyst-" + str(ticks)
+    messages.append(AIMessage(id=message_id, name="Analyst (gpt-4 - v0.2)", content= "My reasoning:  \n\n "+ analsis.reasoning + " \n\n My Statements: \n\n " + analsis.response))
 
     print("analyst done")
     return {'history':history+'\n STATEMENTS:\n'+analsis.response,'statements':analsis.response, 'iterations':iterations, 'insights': insights, 'messages':messages}
@@ -417,7 +418,6 @@ def handle_result(state):
         messages.append(AIMessage(name="Inspector (gpt-4 - v0.2)", content="Rating (" + str(rating.certainty) +  "): "+rating.reasoning))
 
         statements_compare = llm(statement_comparison.format(code1,code2))
-        # messages.append(AIMessage(name="Result", content=statements_compare))
         messages.append(SystemMessage(content=code1))
 
     return {'rating':rating,'code_compare':statements_compare, 'iterations':iterations, 'messages':messages}
@@ -433,9 +433,12 @@ def classify_feedback(state):
     
     state['all_feedback_resolved'] = rating.feedbackResolved
     messages = state.get('messages')
-    messages.append(AIMessage(name= "Inspector (gpt-4o-mini - v0.1)", content="Feedback resolved: " + str(rating.feedbackResolved) + " \n\n Reasoning: "+rating.reasoning))
+    iterations = state.get('iterations','')
+    ticks = time.time()
+    message_id = str(iterations) + "-inspector-" + str(ticks)
+    messages.append(AIMessage(id=message_id, name= "Inspector (gpt-4o-mini - v0.1)", content="Feedback resolved: " + str(rating.feedbackResolved) + " \n\n Reasoning: "+rating.reasoning))
     state['messages'] = messages
-
+    st.info('This is iteration ' + str(iterations + 1), icon="ℹ️")
     return state
 
 # Define the nodes we will cycle between
@@ -483,6 +486,8 @@ st.image("diagram.svg", caption="Process description of the financial analyst ag
 st.write("<br>", unsafe_allow_html=True)
 human_query = st.chat_input("Type your analyst input prompt here...", key="human_query")
 
+messages = {}
+
 if human_query is not None and human_query != "":
 
     st.session_state.chat_history.append(HumanMessage(human_query))
@@ -501,8 +506,10 @@ if human_query is not None and human_query != "":
             if ( value["messages"].__len__() > 0 ):
                 for message in value["messages"]:
                     if (message.content.__len__() > 0):
-                        ticks = time.time()    
-                        key = message.id + "-" + str(ticks)
+                        if (message.id in messages):
+                            continue
+
+                        messages[message.id] = True
 
                         if ( isinstance(message, SystemMessage) ):
                             with st.chat_message("human"):
